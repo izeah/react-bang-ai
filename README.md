@@ -35,7 +35,7 @@ React Bang.AI adalah platform yang terinspirasi dari ChatGPT OpenAI, dengan UI y
    ```
 
 3. **Set up environment variables**:
-   - Buat file `.env` di root directory dan tambahkan variabel yang diperlukan, yaitu `VITE_OPENAI_URL` dan `VITE_OPENAI_API_KEY`.
+   - Duplikat file `.env.example`, lalu rename menjadi `.env` dan isi variabel dengan value yang sesuai.
 
 ## Running Locally
 
