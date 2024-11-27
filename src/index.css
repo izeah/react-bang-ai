@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Add this CSS to your styles */
+.table-container {
+  overflow-x: auto; /* Allow horizontal scrolling if needed */
+}
+
+.table-container table {
+  width: 100%; /* Make the table take the full width of its container */
+  table-layout: auto; /* Allow the table to adjust column widths automatically */
+  border-collapse: collapse; /* Collapse borders for a cleaner look */
+}
+
+.table-container th,
+.table-container td {
+  padding: 8px; /* Add padding for better readability */
+  border: 1px solid #ddd; /* Add border to table cells */
+  word-wrap: break-word; /* Allow words to break and wrap */
+  max-width: 100px; /* Optional: Set a max width for cells */
+}
+
+.table-container th {
+  background-color: #f2f2f2; /* Add a background color to header cells */
+}
