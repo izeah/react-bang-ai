@@ -37,6 +37,26 @@ function App() {
     }
   }, [chatHistory]);
 
+  // Fungsi untuk toggle collapse/expand reasoning pada pesan tertentu
+  const toggleReasoning = (index) => {
+    setChatHistory((prevMessages) => {
+      const updateChatHistory = [...prevMessages];
+      if (updateChatHistory[index].reasoningFinished) {
+        updateChatHistory[index].isReasoningCollapsed =
+          !updateChatHistory[index].isReasoningCollapsed;
+      }
+      return updateChatHistory;
+    });
+  };
+
+  // Fungsi untuk format durasi (detik/menit)
+  const formatDuration = (sec) => {
+    if (sec < 60) return `${sec} detik`;
+    const minutes = Math.floor(sec / 60);
+    const seconds = sec % 60;
+    return `${minutes} menit ${seconds} detik`;
+  };
+
   const handleSubmit = useCallback(async (e) => {
     if (!chatRef.current?.value?.trim()) return; // Prevent empty messages
 
@@ -48,43 +68,99 @@ function App() {
       // Clear input field after sending
       chatRef.current.value = "";
 
-      const newMessage = { sender: "user", text: inputMessage };
+      const newMessage = {
+        sender: "user",
+        text: inputMessage,
+        reasoningText: "",
+        isReasoningActive: false,
+        reasoningFinished: false,
+        isReasoningCollapsed: false,
+        reasoningDuration: 0,
+      };
       setChatHistory((prevChatHistory) => [...prevChatHistory, newMessage]);
 
       // Add a placeholder for the bot's response
-      const botMessage = { sender: "bot", text: "" };
+      const botMessage = {
+        sender: "bot",
+        text: "",
+        reasoningText: "",
+        isReasoningActive: false,
+        reasoningFinished: false,
+        isReasoningCollapsed: false,
+        reasoningDuration: 0,
+      };
       setChatHistory((prevChatHistory) => [...prevChatHistory, botMessage]);
 
+      let accumulatedResponse = "";
+      let reasoningStartTime = null;
+      let reasoningDuration = null;
       try {
         setIsStreaming(true); // Start streaming
         const responseStream = await OpenAIChatCompletion.createCompletion(
           inputMessage
         );
 
-        reader.current = responseStream.getReader();
-        const decoder = new TextDecoder("utf-8");
-        while (true) {
-          const { value, done } = await reader.current.read();
-          if (done) break;
-          const decodedChunk = decoder.decode(value);
-          const lines = decodedChunk.split("\n");
-          const parsedLines = lines
-            .map((line) => line.replace("data: ", "").trim())
-            .filter((line) => line !== "" && line !== "[DONE]")
-            .map((line) => JSON.parse(line));
+        reader.current = { isStreaming: true };
+        for await (const chunk of responseStream) {
+          if (!reader.current.isStreaming) break;
 
-          for (const parsedLine of parsedLines) {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            const content = parsedLine.choices[0].delta.content;
-            if (content) {
-              // Update the last message in chatHistory with the new chunk
-              setChatHistory((prevChatHistory) => {
-                const updatedHistory = [...prevChatHistory];
-                updatedHistory[updatedHistory.length - 1].text += content;
-                return updatedHistory;
-              });
+          accumulatedResponse += chunk.message.content;
+
+          // Cek apakah ada tag <think> yang muncul
+          const thinkStart = accumulatedResponse.indexOf("<think>");
+          const thinkEnd = accumulatedResponse.indexOf("</think>");
+
+          let responseText = "";
+          let reasoningText = "";
+          let isReasoningActive = false;
+          let reasoningFinished = false;
+          let isReasoningCollapsed = false;
+
+          if (thinkStart !== -1) {
+            // Jika ada tag <think>
+            if (!reasoningStartTime) reasoningStartTime = Date.now();
+            if (thinkEnd !== -1) {
+              if (!reasoningDuration)
+                reasoningDuration = Math.floor(
+                  (Date.now() - reasoningStartTime) / 1000
+                );
+              // Reasoning sudah selesai (tag </think> sudah ada)
+              reasoningText = accumulatedResponse.slice(
+                thinkStart + 7,
+                thinkEnd
+              );
+              isReasoningActive = false;
+              reasoningFinished = true;
+              isReasoningCollapsed = true;
+              // Gabungkan teks sebelum <think> dengan teks setelah </think> (jika ada)
+              responseText =
+                accumulatedResponse.slice(0, thinkStart) +
+                accumulatedResponse.slice(thinkEnd + 8);
+            } else {
+              // Reasoning belum selesai (tag <think> muncul, tapi belum ada </think>)
+              reasoningText = accumulatedResponse.slice(thinkStart + 7);
+              isReasoningActive = true;
+              responseText = accumulatedResponse.slice(0, thinkStart);
             }
+          } else {
+            // Tidak ada tag <think> sama sekali
+            responseText = accumulatedResponse;
           }
+
+          setChatHistory((prevChatHistory) => {
+            const updatedHistory = [...prevChatHistory];
+            const lastIndex = updatedHistory.length - 1;
+            updatedHistory[lastIndex] = {
+              ...updatedHistory[lastIndex],
+              text: responseText,
+              reasoningText,
+              isReasoningActive,
+              reasoningDuration,
+              reasoningFinished,
+              isReasoningCollapsed,
+            };
+            return updatedHistory;
+          });
         }
       } catch (error) {
         console.error("Error creating completion:", error);
@@ -102,7 +178,7 @@ function App() {
 
   const stopStreaming = useCallback(() => {
     if (reader.current) {
-      reader.current.cancel(); // Cancel the reader to stop streaming
+      reader.current.isStreaming = false; // Cancel the reader to stop streaming
       setIsStreaming(false);
     }
   }, []);
@@ -169,26 +245,72 @@ function App() {
                 message.sender === "bot" ? "justify-start" : "justify-end"
               } mt-2 mx-2`}
             >
-              {message.sender === "bot" && (
-                <div className="flex items-center mr-2 w-10 h-10 rounded-full bg-gray-300 shrink-0">
-                  <img
-                    src={aiIcon}
-                    alt="Bot Avatar"
-                    className="w-6 h-6 m-auto"
+              {message.sender === "bot" && message.isReasoningActive && (
+                <div className="flex reasoning-box">
+                  <div className="shrink-0 spinner animate-spin" />
+                  <ReactMarkdown
+                    className="prose prose-sm dark:prose-dark"
+                    children={message.reasoningText}
+                    components={renderers}
+                    remarkPlugins={[remarkGfm]}
                   />
                 </div>
               )}
-              <div
-                className={`${
-                  message.sender === "bot" ? "bg-gray-300" : "bg-green-500"
-                } rounded-lg px-4 py-2 text-black max-sm:max-w-xs max-w-xl table-container`}
-              >
-                <ReactMarkdown
-                  className="prose prose-sm dark:prose-dark"
-                  children={message.text}
-                  components={renderers}
-                  remarkPlugins={[remarkGfm]}
-                />
+              <div className="flex flex-col gap-4">
+                {message.reasoningFinished && (
+                  <div>
+                    <div
+                      className="reasoning-header"
+                      onClick={() => toggleReasoning(index)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <span className="toggle-icon">
+                        {message.isReasoningCollapsed ? "+" : "-"}
+                      </span>
+                      <span className="reasoning-duration">
+                        sudah menalar selama{" "}
+                        {formatDuration(message.reasoningDuration)}
+                      </span>
+                    </div>
+                    {!message.isReasoningCollapsed && (
+                      <div className="reasoning-box max-sm:max-w-xs max-w-2xl">
+                        <ReactMarkdown
+                          className="prose prose-sm dark:prose-dark"
+                          children={message.reasoningText}
+                          components={renderers}
+                          remarkPlugins={[remarkGfm]}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex flex-row">
+                  {message.sender === "bot" && !message.isReasoningActive && (
+                    <div className="flex items-center mr-2 w-10 h-10 rounded-full bg-gray-300 shrink-0">
+                      <img
+                        src={aiIcon}
+                        alt="Bot Avatar"
+                        className="w-6 h-6 m-auto"
+                      />
+                    </div>
+                  )}
+                  <div
+                    className={`${
+                      message.sender === "bot" && message.isReasoningActive
+                        ? "hidden"
+                        : "block"
+                    } ${
+                      message.sender === "bot" ? "bg-gray-300" : "bg-green-500"
+                    } rounded-lg px-4 py-2 text-black max-sm:max-w-xs max-w-xl table-container`}
+                  >
+                    <ReactMarkdown
+                      className="prose prose-sm dark:prose-dark"
+                      children={message.text}
+                      components={renderers}
+                      remarkPlugins={[remarkGfm]}
+                    />
+                  </div>
+                </div>
               </div>
               {message.sender === "user" && (
                 <div className="flex items-center ml-2 w-10 h-10 rounded-full bg-gray-300 shrink-0">
