@@ -246,7 +246,7 @@ function App() {
               } mt-2 mx-2`}
             >
               {message.sender === "bot" && message.isReasoningActive && (
-                <div className="flex reasoning-box">
+                <div className="flex gap-4 reasoning-box">
                   <div className="shrink-0 spinner animate-spin" />
                   <ReactMarkdown
                     className="prose prose-sm dark:prose-dark"
